@@ -1,84 +1,101 @@
 #include <iostream>
-#include <cstdlib>
 #include <string>
+#include <vector>
+#include <stdexcept>
 #include <cstring>
 #include <unistd.h>
-#include <sys/types.h>
 #include <sys/socket.h>
-#include <arpa/inet.h>
-#include <netdb.h>
+#include <netinet/in.h>
+#include <regex>
+#include <filesystem> // Used for going through file system
 
-int main(int argc, char **argv) {
-  // Flush after every std::cout / std::cerr
-  std::cout << std::unitbuf;
-  std::cerr << std::unitbuf;
+class TcpServer {
+public:
+    explicit TcpServer(uint16_t port) {
+        // Creating a socket
+        server_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (server_fd < 0) throw std::runtime_error("Failed to create socket");
 
-   // Creating a socket
-   int server_fd = socket(AF_INET, SOCK_STREAM, 0); //AF_INET -> will use IPv4 family, SOCK_STREAM -> stream-based connection,
-   if (server_fd < 0) {
-    std::cerr << "Failed to create server socket\n";
-    return 1;
-   }
+        int reuse = 1;
+        // Setting Socket Options. This allows reusing the same address multiple times
+        if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
+            throw std::runtime_error("setsockopt failed");
 
-   // Setting Socket Options. This allows reausing the same address multiple times
-   int reuse = 1;
-   if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-     std::cerr << "setsockopt failed\n";
-     return 1;
-   }
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET; // IPv4
+        addr.sin_addr.s_addr = INADDR_ANY; // Accept connections to any available address
+        addr.sin_port = htons(port); // Sets the port number
 
-   struct sockaddr_in server_addr; // Creates structure that hold the server's address and port
-   server_addr.sin_family = AF_INET; //
-   server_addr.sin_addr.s_addr = INADDR_ANY; // Will accept connections to any available
-   server_addr.sin_port = htons(4221); // Sets the port number
+        if (bind(server_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) // bind the socket to this address and port
+            throw std::runtime_error("Failed to bind");
 
-   // binds the socket to this address port
-   if (bind(server_fd, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0) {
-     std::cerr << "Failed to bind to port 4221\n";
-     return 1;
-   }
+        if (listen(server_fd, 5) != 0) // start listening to incoming connections
+            throw std::runtime_error("Listen failed");
+    }
 
-   int connection_backlog = 5; // Maximum number of pending connections
-   if (listen(server_fd, connection_backlog) != 0) { // start listening to incoming connections
-     std::cerr << "listen failed\n";
-     return 1;
-   }
+    ~TcpServer() { if (server_fd >= 0) close(server_fd); } // Destructor to close the socket
 
-   struct sockaddr_in client_addr;
-   int client_addr_len = sizeof(client_addr); // stores information about the client
+    void run() {
+        sockaddr_in client_addr{}; // stores information about the client
+        socklen_t client_len = sizeof(client_addr); // length of the client address structure
+        int client_fd = accept(server_fd, reinterpret_cast<sockaddr*>(&client_addr), &client_len); // wait for client to connect
+        if (client_fd < 0) throw std::runtime_error("Accept failed"); // check if accept was successful
 
-   std::cout << "Waiting for a client to connect...\n";
+        std::string request = read_request(client_fd); // read the request from the client
+        std::cout << "Received request:\n" << request << std::endl; // print the request
 
-   int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len); // wait for client to connect
-   std::cout << "Client connected\n";
+        if (check_request(request)){
+            std::string response = "HTTP/1.1 200 OK\r\n\r\n";
+            send(client_fd, response.c_str(), response.size(), 0);
+        }
+        else {
+            std::string response_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
+            send(client_fd, response_404.c_str(), response_404.size(), 0);
+        }
 
-   class response_serv
-   {
-     public:
-       std::string http_version;
-       std::string status;
-       std::string reason_phrase;
-       std::string crlf;
+        close(client_fd);
+    }
 
-       //Constructor for our class
-       response_serv()
-       : http_version("HTTP/1.1")
-       , status("200")
-       , reason_phrase("OK")
-       , crlf("\r\n")
-       {}
+private:
+    int server_fd;
 
-   };
-   response_serv response = response_serv();
+    std::string read_request(int fd) {
+        std::vector<char> buffer(4096);
+        ssize_t bytes = recv(fd, buffer.data(), buffer.size() - 1, 0);
+        if (bytes > 0) {
+            buffer[bytes] = '\0';
+            return std::string(buffer.data());
+        }
+        return {};
+    }
 
-   // Creating a response for succesfull connection
-   std::string responseStr = response.http_version + " " + response.status + " " + response.reason_phrase + response.crlf + response.crlf;
+    //Check if path exists on the server
+    static bool check_request(std::string const& request) {
+        std::regex path_regex(R"(^\S+\s(\S+))");
 
-   // Sending response back to the client -> int client_fd = accept(server_fd, (struct sockaddr *) &client_addr, (socklen_t *) &client_addr_len);
-   send(client_fd, responseStr.c_str(), responseStr.length(), 0);
+        if (std::smatch first_match; std::regex_search(request, first_match, path_regex))
+        {
+            std::string path = first_match[1].str();
+            std::cout << "Path: "<< path << std::endl;
 
-   close(server_fd);
-   close(client_fd);
+            //Removing the leading '/' from the request
+            std::filesystem::path full_path = std::filesystem::current_path() / path.substr(1);
 
-  return 0;
+            if (std::filesystem::exists(full_path))
+                return true;
+        }
+        return false;
+    }
+};
+
+int main() {
+    try {
+        TcpServer server(4221);
+        std::cout << "Waiting for a client to connect...\n";
+        server.run();
+    } catch (const std::exception& ex) {
+        std::cerr << ex.what() << std::endl;
+        return 1;
+    }
+    return 0;
 }
