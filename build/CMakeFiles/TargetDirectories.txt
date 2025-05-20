@@ -1,0 +1,3 @@
+/Users/Sok205/CLionProjects/http-server/build/CMakeFiles/server.dir
+/Users/Sok205/CLionProjects/http-server/build/CMakeFiles/edit_cache.dir
+/Users/Sok205/CLionProjects/http-server/build/CMakeFiles/rebuild_cache.dir
