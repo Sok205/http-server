@@ -1,0 +1,141 @@
+# https://releases.llvm.org/18.1.6/tools/clang/tools/extra/docs/clang-tidy/checks/list.html
+Checks: >
+  boost-use-to-string,
+  bugprone-*,
+  -bugprone-signal-handler,
+  -bugprone-macro-parentheses,
+  -bugprone-unused-return-value,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-empty-catch,
+  clang-diagnostic-*,
+  clang-analyzer-*,
+  cppcoreguidelines-avoid-do-while,
+  cppcoreguidelines-avoid-goto,
+  cppcoreguidelines-avoid-non-const-global-variables,
+  cppcoreguidelines-avoid-reference-coroutine-parameters,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-no-malloc,
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-prefer-member-initializer,
+  cppcoreguidelines-pro-type-const-cast,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-special-member-functions,
+  cppcoreguidelines-virtual-class-destructor,
+  cppcoreguidelines-narrowing-conversions,
+  cppcoreguidelines-misleading-capture-default-by-value,
+  cppcoreguidelines-missing-std-forward,
+  cppcoreguidelines-no-suspend-with-lock,
+  cppcoreguidelines-rvalue-reference-param-not-moved,
+  google-default-arguments,
+  google-runtime-int,
+  google-explicit-constructor,
+  google-readability-avoid-underscore-in-googletest-name,
+  google-readability-casting,
+  google-upgrade-googletest-case,
+  google-build-using-namespace,
+  google-default-arguments,
+  google-global-names-in-headers,
+  llvm-namespace-comment,
+  misc-*,
+  -misc-confusable-identifiers,
+  -misc-no-recursion,
+  -misc-non-private-member-variables-in-classes,
+  modernize-*,
+  -modernize-avoid-c-arrays,
+  -modernize-concat-nested-namespaces,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  performance-*,
+  -performance-no-int-to-ptr,
+  portability-std-allocator-const,
+  portability-simd-intrinsics,
+  readability-*,
+  -readability-operators-representation,
+  -readability-redundant-access-specifiers,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-function-size,
+  -readability-identifier-length,
+  -readability-redundant-member-init
+
+WarningsAsErrors: "*"
+HeaderFilterRegex: ".*"
+FormatStyle: file
+
+# https://releases.llvm.org/16.0.0/tools/clang/tools/extra/docs/clang-tidy/checks/readability/identifier-naming.html
+CheckOptions:
+  - key: readability-implicit-bool-conversion.AllowPointerConditions
+    value: true
+  - key: readability-identifier-naming.AggressiveDependentMemberLookup
+    value: Off
+  - key: readability-identifier-naming.ClassHungarianPrefix
+    value: Off
+  - key: readability-identifier-naming.ClassIgnoredRegexp
+    value: ""
+  - key: readability-identifier-naming.IgnoreFailedSplit
+    value: Off
+  - key: readability-identifier-naming.GetConfigPerFile
+    value: On
+  - key: readability-identifier-naming.IgnoreMainLikeFunctions
+    value: On
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.ClassPrefix
+    value: ""
+  - key: readability-identifier-naming.ClassSuffix
+    value: ""
+  - key: readability-identifier-naming.ClassMethodCase
+    value: camelBack
+  - key: readability-identifier-naming.NamespaceCase
+    value: camelBack
+  - key: readability-identifier-naming.TypedefCase
+    value: CamelCase
+  - key: readability-identifier-naming.TypeAliasCase
+    value: CamelCase
+  - key: readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key: readability-identifier-naming.UnionCase
+    value: CamelCase
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.FunctionCase
+    value: camelBack
+  - key: readability-identifier-naming.ParameterCase
+    value: camelBack
+  - key: readability-identifier-naming.MemberCase
+    value: camelBack
+  - key: readability-identifier-naming.MethodCase
+    value: camelBack
+  - key: readability-identifier-naming.VirtualMethodCase
+    value: camelBack
+  - key: readability-identifier-naming.PublicMethodCase
+    value: camelBack
+  - key: readability-identifier-naming.ProtectedMethodCase
+    value: camelBack
+  - key: readability-identifier-naming.PrivateMethodCase
+    value: camelBack
+  - key: readability-identifier-naming.PublicMemberCase
+    value: camelBack
+  - key: readability-identifier-naming.ProtectedMemberCase
+    value: camelBack
+  - key: readability-identifier-naming.PrivateMemberCase
+    value: camelBack
+  - key: readability-identifier-naming.ProtectedMemberSuffix
+    value: "_"
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: "_"
+  - key: readability-identifier-naming.LocalVariableCase
+    value: camelBack
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.TemplateParameterCase
+    value: CamelCase
+  - key: misc-include-cleaner.IgnoreHeaders
+    value: "math.h|stdio.h|yaml.h"
+  - key: bugprone-signed-char-misuse.CharTypdefsToIgnore
+    value: "int8_t"
+  - key: bugprone-signed-char-misuse.DiagnoseSignedUnsignedCharComparisons
+    value: false
+  - key: modernize-loop-convert.UseCxx20ReverseRanges
+    value: false
