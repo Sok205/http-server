@@ -1,6 +1,9 @@
 //
 // Created by Filip Sokołowski on 21/05/2025.
 //
+#pragma once
+
+#include <thread>
 
 #ifndef SERVER_HPP
 #define SERVER_HPP
@@ -32,25 +35,29 @@ public:
     ~TcpServer() = default;
 
     void run() {
+
+        std::vector<std::thread> serverThreads;
         while (true) {
             sockaddr_in client_addr{}; // stores information about the client
             socklen_t client_len = sizeof(client_addr); // length of the client address structure
             int client_fd = accept(serverFd_, reinterpret_cast<sockaddr*>(&client_addr), &client_len); // wait for client to connect
             if (client_fd < 0) throw std::runtime_error("Accept failed"); // check if accept was successful
 
-            std::string request = read_request(client_fd); // read the request from the client
-            std::cout << "Received request:\n" << request << std::endl; // print the request
+            serverThreads.emplace_back([this, client_fd]() {
+                std::string request = read_request(client_fd); // read the request from the client
+                std::cout << "Received request:\n" << request << std::endl; // print the request
 
-            if (check_request(request)){
-                std::string response = "HTTP/1.1 200 OK\r\n\r\n";
-                send(client_fd, response.c_str(), response.size(), 0);
-            }
-            else {
-                std::string response_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
-                send(client_fd, response_404.c_str(), response_404.size(), 0);
-            }
+                if (check_request(request)){
+                    std::string response = "HTTP/1.1 200 OK\r\n\r\n";
+                    send(client_fd, response.c_str(), response.size(), 0);
+                  }
+                  else {
+                      std::string response_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
+                      send(client_fd, response_404.c_str(), response_404.size(), 0);
+                  }
+                close(client_fd);
+            }); //allows thread to run independently of the main thread
 
-            close(client_fd);
         }
     }
 
