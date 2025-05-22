@@ -8,7 +8,101 @@
 
 #ifndef SERVER_HPP
 #define SERVER_HPP
+//TODO: Add routing
+//TODO: Add error handling (for the request that doesn't exist
+enum class RequestType {GET = 0, POST = 1, PUT = 2, DELETE = 3};
 
+//Changing string to RequestType.
+static RequestType toRequestType(const std::string& requestT)
+{
+    if (requestT == "GET")
+        return RequestType::GET;
+    if (requestT == "POST")
+        return RequestType::POST;
+    if (requestT == "PUT")
+        return RequestType::PUT;
+    if (requestT == "DELETE")
+        return RequestType::DELETE;
+    else
+        return RequestType::GET;
+}
+
+class RequestHandler
+{
+    public:
+        // constructor
+        RequestHandler() = default;
+
+        // move, copy operators and assignments
+        RequestHandler(const RequestHandler&) = default;
+        RequestHandler& operator=(const RequestHandler&) = default;
+        RequestHandler(RequestHandler&&) = default;
+        RequestHandler& operator=(RequestHandler&&) = default;
+
+        // handling the request
+        virtual std::string handler(const std::string& path, const std::string& body) = 0;
+
+        // destructor
+        virtual ~RequestHandler() = default;
+
+        // type of request
+        virtual RequestType getType() const = 0;
+
+};
+
+class GETHandler final : public RequestHandler
+{
+    std::string handler(const std::string &path, const std::string &body) override
+    {
+        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nGET: " + path;
+    }
+
+    RequestType getType() const override
+    {
+        return RequestType::GET;
+    }
+};
+
+class POSTHandler final : public RequestHandler
+{
+    std::string handler(const std::string &path, const std::string &body) override
+    {
+        return "HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\n\r\nPOST Body: " + body;
+    }
+
+    RequestType getType() const override
+    {
+        return RequestType::POST;
+    }
+};
+//TODO:
+// class PUTHandler final : public RequestHandler
+// {
+//     std::string handler(const std::string &path, const std::string &body) override
+// };
+
+//TODO:
+// class DELETEHandler final : public RequestHandler
+// {
+//
+// };
+
+class RequestHandlerFactory
+{
+public:
+    static std::unique_ptr<RequestHandler> createHandler(RequestType const type)
+    {
+        switch (type)
+        {
+            case RequestType::GET:
+                return std::unique_ptr<GETHandler>();
+            case RequestType::POST:
+                return std::unique_ptr<POSTHandler>();
+            default:
+                return std::unique_ptr<RequestHandler>();
+        }
+    }
+};
 
 class TcpServer {
 public:
@@ -31,8 +125,13 @@ public:
         addr.sin_addr.s_addr = INADDR_ANY; // Accept connections to any available address
         addr.sin_port = htons(port); // Sets the port number
 
-        if (bind(serverFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) // bind the socket to this address and port
-            throw BindException("Bind failed");
+        if (bind(serverFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            if (errno == EADDRINUSE) {
+                throw BindException("Bind failed: Port is already in use");
+            } else {
+                throw BindException(std::string("Bind failed: ") + std::strerror(errno));
+            }
+        }
 
 
         if (listen(serverFd_, 5) != 0) // start listening to incoming connections
@@ -56,8 +155,22 @@ public:
                 std::cout << "Received request:\n" << request << std::endl; // print the request
 
                 if (check_request(request)){
-                    const std::string response = "HTTP/1.1 200 OK\r\n\r\n";
-                    send(client_fd, response.c_str(), response.size(), 0);
+                  try
+                      {
+                        std::string method, path, version;
+                        std::istringstream stream(request);
+                        stream >> method >> path >> version;
+
+                        auto handler = RequestHandlerFactory::createHandler(toRequestType(method));
+                        std::string body = extractBody(request);
+
+                        std::string response = handler->handler(path, body);
+                        send(client_fd, response.c_str(), response.size(), 0);
+
+                      } catch (const std::exception& e)
+                      {
+                          std::cout << e.what() << std::endl;
+                      }
                   }
                   else {
                       const std::string response_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
@@ -67,10 +180,20 @@ public:
             }); //allows thread to run independently of the main thread
 
         }
+        // Joining all the threads
+        for (auto& thread : serverThreads)
+            thread.join();
     }
 
 private:
     int serverFd_;
+
+    static std::string extractBody(const std::string& request) {
+        if (const auto pos = request.find("\r\n\r\n"); pos != std::string::npos) {
+            return request.substr(pos + 4);
+        }
+        return "";
+    }
 
     static std::string read_request(const int fd) {
         std::vector<char> buffer(4096);
