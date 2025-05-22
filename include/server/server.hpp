@@ -1,11 +1,6 @@
 //
 // Created by Filip Sokołowski on 22/05/2025.
 //
-
-#ifndef SERVER_HPP
-//
-// Created by Filip Sokołowski on 21/05/2025.
-//
 #pragma once
 
 #include <thread>
@@ -99,6 +94,3 @@ private:
 };
 #endif //SERVER_HPP
 
-#define SERVER_HPP
-
-#endif //SERVER_HPP
