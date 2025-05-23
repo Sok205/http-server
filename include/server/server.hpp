@@ -3,8 +3,10 @@
 //
 #pragma once
 
-#include <thread>
+#include <mutex>
 #include <server/exceptions.hpp>
+#include <thread>
+#include <csignal>
 
 #ifndef SERVER_HPP
 #define SERVER_HPP
@@ -95,17 +97,18 @@ public:
         switch (type)
         {
             case RequestType::GET:
-                return std::unique_ptr<GETHandler>();
+                return std::make_unique<GETHandler>();
             case RequestType::POST:
-                return std::unique_ptr<POSTHandler>();
+                return std::make_unique<POSTHandler>();
             default:
-                return std::unique_ptr<RequestHandler>();
+                throw std::invalid_argument("Unsupported request type");
         }
     }
 };
 
 class TcpServer {
 public:
+
     explicit TcpServer(uint16_t port) : serverFd_(::socket(AF_INET, SOCK_STREAM, 0))
     {
         // Creating a socket
@@ -140,54 +143,75 @@ public:
 
     ~TcpServer() = default;
 
+    // // ask about this retarded approach
+    // void signal_handler(int sig)
+    // {
+    //     running = false;
+    //     close(serverFd_);
+    // }
+
     void run() const {
 
         std::vector<std::thread> serverThreads;
-        while (true) {
+
+
+        while (running) {
             sockaddr_in client_addr{}; // stores information about the client
             socklen_t client_len = sizeof(client_addr); // length of the client address structure
             int client_fd = accept(serverFd_, reinterpret_cast<sockaddr*>(&client_addr), &client_len); // wait for client to connect
             if (client_fd < 0)
                 throw AcceptException("Accept failed"); // check if accept was successful
 
-            serverThreads.emplace_back([this, client_fd]() {
-                const std::string request = read_request(client_fd); // read the request from the client
-                std::cout << "Received request:\n" << request << std::endl; // print the request
+            serverThreads.emplace_back([this, client_fd]() {handleClient(client_fd);});//allows thread to run independently of the main thread
 
-                if (check_request(request)){
-                  try
-                      {
-                        std::string method, path, version;
-                        std::istringstream stream(request);
-                        stream >> method >> path >> version;
-
-                        auto handler = RequestHandlerFactory::createHandler(toRequestType(method));
-                        std::string body = extractBody(request);
-
-                        std::string response = handler->handler(path, body);
-                        send(client_fd, response.c_str(), response.size(), 0);
-
-                      } catch (const std::exception& e)
-                      {
-                          std::cout << e.what() << std::endl;
-                      }
-                  }
-                  else {
-                      const std::string response_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
-                      send(client_fd, response_404.c_str(), response_404.size(), 0);
-                  }
-                close(client_fd);
-            }); //allows thread to run independently of the main thread
 
         }
-        // Joining all the threads
+        //Joins all the threads after the execution of the server
         for (auto& thread : serverThreads)
-            thread.join();
+            if (thread.joinable())
+                thread.join();
     }
 
 private:
+    // Server
     int serverFd_;
+    std::atomic<bool> running{true};
 
+    // Mutexes
+    inline static std::mutex m_request;
+
+    static void handleClient(int client_fd)
+    {
+        std::lock_guard<std::mutex> lock(m_request);
+        const std::string request = read_request(client_fd); // read the request from the client
+        std::cout << "Received request:\n" << request << std::endl; // print the request
+
+        if (check_request(request)){
+            try
+            {
+                std::string method, path, version;
+                std::istringstream stream(request);
+                stream >> method >> path >> version;
+
+                auto handler = RequestHandlerFactory::createHandler(toRequestType(method));
+                std::string body = extractBody(request);
+
+                std::string response = handler->handler(path, body);
+                send(client_fd, response.c_str(), response.size(), 0);
+
+            } catch (const std::exception& e)
+            {
+                std::cout << e.what() << std::endl;
+            }
+        }
+        else {
+            const std::string response_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
+            send(client_fd, response_404.c_str(), response_404.size(), 0);
+        }
+        close(client_fd);
+    }
+
+    // extract body from request
     static std::string extractBody(const std::string& request) {
         if (const auto pos = request.find("\r\n\r\n"); pos != std::string::npos) {
             return request.substr(pos + 4);
@@ -195,6 +219,7 @@ private:
         return "";
     }
 
+    // reads the whole request
     static std::string read_request(const int fd) {
         std::vector<char> buffer(4096);
         if (const ssize_t bytes = recv(fd, buffer.data(), buffer.size() - 1, 0); bytes > 0) {
@@ -221,6 +246,7 @@ private:
         }
         return false;
     }
+
 };
 #endif //SERVER_HPP
 
