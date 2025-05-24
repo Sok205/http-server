@@ -12,7 +12,12 @@
 #include <thread>
 int main() {
     try {
-        TcpServer server(4222);
+        Router router;
+        router.addRoute(RequestType::GET, "/hello", [](const std::string&, const std::string&) {
+            return "Hello from /hello!";
+        });
+
+        TcpServer server(4222, router);
         std::cout << "Waiting for a client to connect...\n";
 
         std::thread serverThread([&server]() {

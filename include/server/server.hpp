@@ -3,14 +3,18 @@
 //
 #pragma once
 
+#include <csignal>
 #include <mutex>
 #include <server/exceptions.hpp>
 #include <thread>
-#include <csignal>
+#include <functional>
+#include <unordered_map>
 
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
+
+using RouteHandler = std::function<std::string(const std::string&, const std::string&)>;
 
 //----------------------------Requests---------------------------------
 //TODO: Add routing
@@ -129,11 +133,40 @@ public:
 };
 //----------------------------Requests---------------------------------
 
+class Router
+{
+    public:
+        void addRoute(RequestType const type,const std::string& path ,RouteHandler handler)
+        {
+            routes_[{type, path}] = std::move(handler);
+        }
+
+        RouteHandler getHandler(RequestType const type, const std::string& path) const
+        {
+            // If route was found returning RouteHandler of given route. Else return nullptr
+            if (const auto it = routes_.find({type, path}); it != routes_.end())
+                return it->second;
+            return nullptr;
+        }
+
+    private:
+        struct Hash {
+            std::size_t operator()(const std::pair<RequestType, std::string>& p) const {
+                const std::size_t h1 = std::hash<int>()(static_cast<int>(p.first));
+                const std::size_t h2 = std::hash<std::string>()(p.second);
+                return h1 ^ (h2 << 1);
+            }
+        };
+
+        // Hashing the map
+        std::unordered_map<std::pair<RequestType, std::string>, RouteHandler, Hash> routes_;
+};
+
 //----------------------------TCPSERVER---------------------------------
 class TcpServer {
 public:
 
-    explicit TcpServer(uint16_t port) : serverFd_(::socket(AF_INET, SOCK_STREAM, 0))
+    TcpServer(uint16_t port, Router& router) : serverFd_(::socket(AF_INET, SOCK_STREAM, 0)), router_(router)
     {
         // Creating a socket
 
@@ -167,13 +200,6 @@ public:
 
     ~TcpServer() = default;
 
-    // // ask about this retarded approach
-    // void signal_handler(int sig)
-    // {
-    //     running = false;
-    //     close(serverFd_);
-    // }
-
     void run() const {
 
         std::vector<std::thread> serverThreads;
@@ -199,41 +225,66 @@ public:
 private:
     // Server
     int serverFd_;
+
+    // Check if server should run
     std::atomic<bool> running{true};
+
+    // Router
+    Router& router_;
 
     // Mutexes
     inline static std::mutex m_request;
 
-    static void handleClient(int client_fd)
+    void handleClient(int client_fd) const
     {
         std::lock_guard<std::mutex> lock(m_request);
         const std::string request = read_request(client_fd); // read the request from the client
         std::cout << "Received request:\n" << request << std::endl; // print the request
 
-        if (check_request(request)){
             try
             {
+                std::cout << request << std::endl;
                 std::string method, path, version;
                 std::istringstream stream(request);
                 stream >> method >> path >> version;
 
-                auto handler = RequestHandlerFactory::createHandler(toRequestType(method));
+                RequestType type = toRequestType(method);
                 std::string body = extractBody(request);
+                RouteHandler routeHandler = router_.getHandler(type, path);
 
-                std::string response = handler->handler(path, body);
+                std::string response;
+                if (routeHandler) {
+
+                    std::string content = routeHandler(path, body);
+                    std::ostringstream oss;
+                    oss << "HTTP/1.1 200 OK\r\n"
+                        << "Content-Type: text/plain\r\n"
+                        << "Content-Length: " << content.size() << "\r\n"
+                        << "Connection: close\r\n\r\n"
+                        << content;
+
+                    response = oss.str();
+                    send(client_fd, response.c_str(), response.size(), 0);
+
+                } else {
+                    response = "HTTP/1.1 404 Not Found\r\n\r\nRoute not found";
+                }
+
                 send(client_fd, response.c_str(), response.size(), 0);
 
             } catch (const std::exception& e)
             {
                 std::cout << e.what() << std::endl;
+                const std::string response_500 = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
+                send(client_fd, response_500.c_str(), response_500.size(), 0);
             }
-        }
-        else {
-            const std::string response_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
-            send(client_fd, response_404.c_str(), response_404.size(), 0);
-        }
         close(client_fd);
-    }
+        }
+    //     else {
+    //         const std::string response_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
+    //         send(client_fd, response_404.c_str(), response_404.size(), 0);
+    //     }
+    // }
 
     // extract body from request
     static std::string extractBody(const std::string& request) {
@@ -253,22 +304,23 @@ private:
         return {};
     }
 
-    //Check if path exists on the server
-    static bool check_request(std::string const& request) {
-        const std::regex path_regex(R"(^\S+\s(\S+))");
-
-        if (std::smatch first_match; std::regex_search(request, first_match, path_regex))
-        {
-            const std::string path = first_match[1].str();
-            std::cout << "Path: "<< path << std::endl;
-
-            // Removing the leading '/' from the request
-            if (const std::filesystem::path full_path = std::filesystem::current_path() / path.substr(1);
-                std::filesystem::exists(full_path))
-                return true;
-        }
-        return false;
-    };
+    //Useless right now but keep it just in case xD
+    // //Check if path exists on the server
+    // static bool check_request(std::string const& request) {
+    //     const std::regex path_regex(R"(^\S+\s(\S+))");
+    //
+    //     if (std::smatch first_match; std::regex_search(request, first_match, path_regex))
+    //     {
+    //         const std::string path = first_match[1].str();
+    //         std::cout << "Path: "<< path << std::endl;
+    //
+    //         // Removing the leading '/' from the request
+    //         if (const std::filesystem::path full_path = std::filesystem::current_path() / path.substr(1);
+    //             std::filesystem::exists(full_path))
+    //             return true;
+    //     }
+    //     return false;
+    // };
 };
 
 //----------------------------TCPSERVER---------------------------------
