@@ -10,6 +10,9 @@
 
 #ifndef SERVER_HPP
 #define SERVER_HPP
+
+
+//----------------------------Requests---------------------------------
 //TODO: Add routing
 //TODO: Add error handling (for the request that doesn't exist
 enum class RequestType {GET = 0, POST = 1, PUT = 2, DELETE = 3};
@@ -26,7 +29,7 @@ static RequestType toRequestType(const std::string& requestT)
     if (requestT == "DELETE")
         return RequestType::DELETE;
     else
-        return RequestType::GET;
+        throw std::invalid_argument("Invalid request type" + requestT);
 }
 
 class RequestHandler
@@ -77,17 +80,32 @@ class POSTHandler final : public RequestHandler
         return RequestType::POST;
     }
 };
-//TODO:
-// class PUTHandler final : public RequestHandler
-// {
-//     std::string handler(const std::string &path, const std::string &body) override
-// };
 
-//TODO:
-// class DELETEHandler final : public RequestHandler
-// {
-//
-// };
+class PUTHandler final : public RequestHandler
+{
+    std::string handler(const std::string &path, const std::string &body) override
+    {
+        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nPUT: " + path + "\n" + body;
+    }
+
+    RequestType getType() const override
+    {
+        return RequestType::PUT;
+    }
+};
+
+class DELETEHandler final : public RequestHandler
+{
+    std::string handler(const std::string &path, const std::string &body) override
+    {
+        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nDELETE: " + path;
+    }
+
+    RequestType getType() const override
+    {
+        return RequestType::DELETE;
+    }
+};
 
 class RequestHandlerFactory
 {
@@ -100,12 +118,18 @@ public:
                 return std::make_unique<GETHandler>();
             case RequestType::POST:
                 return std::make_unique<POSTHandler>();
+            case RequestType::PUT:
+                return std::make_unique<PUTHandler>();
+            case RequestType::DELETE:
+                return std::make_unique<DELETEHandler>();
             default:
                 throw std::invalid_argument("Unsupported request type");
         }
     }
 };
+//----------------------------Requests---------------------------------
 
+//----------------------------TCPSERVER---------------------------------
 class TcpServer {
 public:
 
@@ -154,7 +178,7 @@ public:
 
         std::vector<std::thread> serverThreads;
 
-
+        //TODO: free the threads after closing the server or add closing the thread
         while (running) {
             sockaddr_in client_addr{}; // stores information about the client
             socklen_t client_len = sizeof(client_addr); // length of the client address structure
@@ -239,14 +263,15 @@ private:
             std::cout << "Path: "<< path << std::endl;
 
             // Removing the leading '/' from the request
-
             if (const std::filesystem::path full_path = std::filesystem::current_path() / path.substr(1);
                 std::filesystem::exists(full_path))
                 return true;
         }
         return false;
-    }
-
+    };
 };
+
+//----------------------------TCPSERVER---------------------------------
+
 #endif //SERVER_HPP
 
