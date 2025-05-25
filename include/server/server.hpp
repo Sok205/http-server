@@ -9,6 +9,7 @@
 #include <thread>
 #include <functional>
 #include <unordered_map>
+#include <utility>
 
 #ifndef SERVER_HPP
 #define SERVER_HPP
@@ -63,7 +64,7 @@ class GETHandler final : public RequestHandler
 {
     std::string handler(const std::string &path, const std::string &body) override
     {
-        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nGET: " + path;
+        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nGET: " + path + "\n" + body;
     }
 
     RequestType getType() const override
@@ -76,7 +77,7 @@ class POSTHandler final : public RequestHandler
 {
     std::string handler(const std::string &path, const std::string &body) override
     {
-        return "HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\n\r\nPOST Body: " + body;
+        return "HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\n\r\nPOST Body: " + body + "\r\n" + path;
     }
 
     RequestType getType() const override
@@ -102,7 +103,7 @@ class DELETEHandler final : public RequestHandler
 {
     std::string handler(const std::string &path, const std::string &body) override
     {
-        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nDELETE: " + path;
+        return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nDELETE: " + path + "\r\n" + body;
     }
 
     RequestType getType() const override
@@ -118,13 +119,14 @@ public:
     {
         switch (type)
         {
-            case RequestType::GET:
+            using enum RequestType;
+            case GET:
                 return std::make_unique<GETHandler>();
-            case RequestType::POST:
+            case POST:
                 return std::make_unique<POSTHandler>();
-            case RequestType::PUT:
+            case PUT:
                 return std::make_unique<PUTHandler>();
-            case RequestType::DELETE:
+            case DELETE:
                 return std::make_unique<DELETEHandler>();
             default:
                 throw std::invalid_argument("Unsupported request type");
@@ -145,14 +147,17 @@ class Router
         {
             // If route was found returning RouteHandler of given route. Else return nullptr
             if (const auto it = routes_.find({type, path}); it != routes_.end())
+                {
                 return it->second;
+                }
             return nullptr;
         }
 
     private:
         struct Hash {
             std::size_t operator()(const std::pair<RequestType, std::string>& p) const {
-                const std::size_t h1 = std::hash<int>()(static_cast<int>(p.first));
+                const std::size_t h1 = std::hash<int>()
+                    (std::to_underlying(p.first)); //Sonar Qube: Use "std::to_underlying" to cast enums to their underlying type. Link: https://en.cppreference.com/w/cpp/types/underlying_type
                 const std::size_t h2 = std::hash<std::string>()(p.second);
                 return h1 ^ (h2 << 1);
             }
@@ -171,13 +176,17 @@ public:
         // Creating a socket
 
         if (serverFd_ < 0)
-            throw SocketCreationException("Socket creation failed");
+            {
+                throw SocketCreationException("Socket creation failed");
+            }
 
 
         constexpr int reuse = 1;
         // Setting Socket Options. This allows reusing the same address multiple times
         if (setsockopt(serverFd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
-            throw SocketCreationException("Socket option set failed");
+            {
+                throw SocketCreationException("Socket option set failed");
+            }
 
 
         sockaddr_in addr{};
@@ -188,38 +197,76 @@ public:
         if (bind(serverFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
             if (errno == EADDRINUSE) {
                 throw BindException("Bind failed: Port is already in use");
-            } else {
-                throw BindException(std::string("Bind failed: ") + std::strerror(errno));
             }
+            throw BindException(std::string("Bind failed: ") + std::strerror(errno));
         }
 
-
-        if (listen(serverFd_, 5) != 0) // start listening to incoming connections
+        // start listening to incoming connections
+        if (listen(serverFd_, 5) != 0)
+        {
             throw ListenException("Listen failed");
+        }
+    }
+    // Copy constructor (we cannot safely copy this, that is why we use delete)
+    TcpServer(const TcpServer&) = delete;
+
+    // Copy assignment, also unsafe
+    TcpServer& operator=(const TcpServer&) = delete;
+
+    // We can move it, but first we set others serverFd_ to minus one so the destructor won't close the second socket again
+    TcpServer(TcpServer&& other) noexcept
+    : serverFd_(other.serverFd_), router_(other.router_) {
+        other.serverFd_ = -1;
     }
 
-    ~TcpServer() = default;
+    // Closing existing socket then moving TCPSERVER
+    TcpServer& operator=(TcpServer&& other) noexcept {
+        if (this != &other) {
+            if (serverFd_ >= 0) {
+                ::close(serverFd_);
+            }
+            serverFd_ = other.serverFd_;
+            router_ = other.router_;
+            other.serverFd_ = -1;
+        }
+        return *this;
+    }
+
+    // Closing the socket after destruction of the class
+    ~TcpServer() {
+        if (serverFd_ >= 0) {
+            ::close(serverFd_);
+        }
+    }
 
     void run() const {
 
+        // Ask professor about "jthread" xd
         std::vector<std::thread> serverThreads;
 
         //TODO: free the threads after closing the server or add closing the thread
-        while (running) {
-            sockaddr_in client_addr{}; // stores information about the client
-            socklen_t client_len = sizeof(client_addr); // length of the client address structure
-            int client_fd = accept(serverFd_, reinterpret_cast<sockaddr*>(&client_addr), &client_len); // wait for client to connect
-            if (client_fd < 0)
+        while (running_) {
+            sockaddr_in clientAddr{}; // stores information about the client
+            socklen_t socklen = sizeof(clientAddr); // length of the client address structure
+            int const clientFd = accept(serverFd_, reinterpret_cast<sockaddr*>(&clientAddr), &socklen); // wait for client to connect
+            if (clientFd< 0)
+            {
                 throw AcceptException("Accept failed"); // check if accept was successful
+            }
 
-            serverThreads.emplace_back([this, client_fd]() {handleClient(client_fd);});//allows thread to run independently of the main thread
+
+            serverThreads.emplace_back([this, clientFd]() {handleClient(clientFd);});//allows thread to run independently of the main thread
 
 
         }
         //Joins all the threads after the execution of the server
         for (auto& thread : serverThreads)
+        {
             if (thread.joinable())
+            {
                 thread.join();
+            }
+        }
     }
 
 private:
@@ -227,7 +274,7 @@ private:
     int serverFd_;
 
     // Check if server should run
-    std::atomic<bool> running{true};
+    std::atomic<bool> running_{true};
 
     // Router
     Router& router_;
@@ -235,27 +282,30 @@ private:
     // Mutexes
     inline static std::mutex m_request;
 
-    void handleClient(int client_fd) const
+    void handleClient(int clientFd) const
     {
+        //Ask professor about using scopelock instead of lockguard
         std::lock_guard<std::mutex> lock(m_request);
-        const std::string request = read_request(client_fd); // read the request from the client
-        std::cout << "Received request:\n" << request << std::endl; // print the request
+        const std::string request = readRequest(clientFd); // read the request from the client
+        std::cout << "Received request:\n" << request << '\n'; // print the request
 
             try
             {
-                std::cout << request << std::endl;
-                std::string method, path, version;
+                std::cout << request << '\n';
+                std::string method;
+                std::string path;
+                std::string version;
                 std::istringstream stream(request);
                 stream >> method >> path >> version;
 
-                RequestType type = toRequestType(method);
-                std::string body = extractBody(request);
-                RouteHandler routeHandler = router_.getHandler(type, path);
+                RequestType const type = toRequestType(method);
+                std::string const body = extractBody(request);
+                RouteHandler const routeHandler = router_.getHandler(type, path);
 
                 std::string response;
                 if (routeHandler) {
 
-                    std::string content = routeHandler(path, body);
+                    std::string const content = routeHandler(path, body);
                     std::ostringstream oss;
                     oss << "HTTP/1.1 200 OK\r\n"
                         << "Content-Type: text/plain\r\n"
@@ -264,29 +314,23 @@ private:
                         << content;
 
                     response = oss.str();
-                    send(client_fd, response.c_str(), response.size(), 0);
+                    send(clientFd, response.c_str(), response.size(), 0);
 
                 } else {
                     response = "HTTP/1.1 404 Not Found\r\n\r\nRoute not found";
                 }
 
-                send(client_fd, response.c_str(), response.size(), 0);
+                send(clientFd, response.c_str(), response.size(), 0);
 
-            } catch (const std::exception& e)
+            } catch (HandlerException&)
             {
-                std::cout << e.what() << std::endl;
-                const std::string response_500 = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
-                send(client_fd, response_500.c_str(), response_500.size(), 0);
+                const std::string response500 = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
+                send(clientFd, response500.c_str(), response500.size(), 0);
             }
-        close(client_fd);
+        close(clientFd);
         }
-    //     else {
-    //         const std::string response_404 = "HTTP/1.1 404 Not Found\r\n\r\n";
-    //         send(client_fd, response_404.c_str(), response_404.size(), 0);
-    //     }
-    // }
-
     // extract body from request
+    // SonarQube: Replace this const reference to "std::string" by a "std::string_view": https://en.cppreference.com/w/cpp/string/basic_string_view
     static std::string extractBody(const std::string& request) {
         if (const auto pos = request.find("\r\n\r\n"); pos != std::string::npos) {
             return request.substr(pos + 4);
@@ -295,11 +339,11 @@ private:
     }
 
     // reads the whole request
-    static std::string read_request(const int fd) {
+    static std::string readRequest(const int fd) {
         std::vector<char> buffer(4096);
         if (const ssize_t bytes = recv(fd, buffer.data(), buffer.size() - 1, 0); bytes > 0) {
             buffer[bytes] = '\0';
-            return std::string(buffer.data());
+            return {buffer.data()};
         }
         return {};
     }

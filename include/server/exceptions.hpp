@@ -10,41 +10,42 @@
 class CustomException : public std::runtime_error
 {
     public:
-        explicit CustomException(const std::string& msg) : std::runtime_error(msg) {}
-
-        const char* what() const noexcept override
-        {
-            return std::runtime_error::what();
-        };
+        using runtime_error::runtime_error;
 };
 
-class SocketCreationException final : CustomException
+class SocketCreationException final : public CustomException
 {
     public:
-        explicit SocketCreationException(const std::string& msg) : CustomException(msg) {}
+        using CustomException::CustomException;
 };
 
 class SocketOptionSet final : public std::runtime_error
 {
     public:
-        explicit SocketOptionSet(const std::string& msg) : std::runtime_error(msg) {}
+        using runtime_error::runtime_error;
 };
 
-class BindException final : CustomException
+class BindException final : public CustomException
 {
     public:
-        explicit BindException(const std::string& msg) : CustomException(msg) {}
+        using CustomException::CustomException;
 };
 
-class ListenException final : CustomException
+class ListenException final : public CustomException
 {
     public:
-        explicit ListenException(const std::string& msg) : CustomException(msg) {}
+        using CustomException::CustomException;
 };
 
-class AcceptException final : CustomException
+class AcceptException final : public CustomException
 {
     public:
-        explicit AcceptException(const std::string& msg) : CustomException(msg) {}
+        using CustomException::CustomException;
+};
+
+class HandlerException final : public CustomException
+{
+    public:
+        using CustomException::CustomException;
 };
 #endif //EXCEPTIONS_HPP
