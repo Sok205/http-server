@@ -10,6 +10,7 @@
 #include <functional>
 #include <unordered_map>
 #include <utility>
+#include "utils.hpp"
 
 #ifndef SERVER_HPP
 #define SERVER_HPP
@@ -18,44 +19,51 @@
 using RouteHandler = std::function<std::string(const std::string&, const std::string&)>;
 
 //----------------------------Requests---------------------------------
-//TODO: Add routing
-//TODO: Add error handling (for the request that doesn't exist
-enum class RequestType {GET = 0, POST = 1, PUT = 2, DELETE = 3};
+enum class RequestType : std::uint8_t {GET = 0, POST = 1, PUT = 2, DELETE = 3};
 
 //Changing string to RequestType.
 static RequestType toRequestType(const std::string& requestT)
 {
     if (requestT == "GET")
+    {
         return RequestType::GET;
+    }
     if (requestT == "POST")
+    {
         return RequestType::POST;
+    }
     if (requestT == "PUT")
+    {
         return RequestType::PUT;
+    }
     if (requestT == "DELETE")
+    {
         return RequestType::DELETE;
-    else
-        throw std::invalid_argument("Invalid request type" + requestT);
+    }
+
+    throw std::invalid_argument("Invalid request type" + requestT);
+
 }
 
 class RequestHandler
 {
     public:
-        // constructor
+        //* constructor
         RequestHandler() = default;
 
-        // move, copy operators and assignments
+        //* move, copy operators and assignments
         RequestHandler(const RequestHandler&) = default;
         RequestHandler& operator=(const RequestHandler&) = default;
         RequestHandler(RequestHandler&&) = default;
         RequestHandler& operator=(RequestHandler&&) = default;
 
-        // handling the request
+        //* handling the request
         virtual std::string handler(const std::string& path, const std::string& body) = 0;
 
-        // destructor
+        //* destructor
         virtual ~RequestHandler() = default;
 
-        // type of request
+        //* type of request
         virtual RequestType getType() const = 0;
 
 };
@@ -145,7 +153,7 @@ class Router
 
         RouteHandler getHandler(RequestType const type, const std::string& path) const
         {
-            // If route was found returning RouteHandler of given route. Else return nullptr
+            //* If route was found returning RouteHandler of given route. Else return nullptr
             if (const auto it = routes_.find({type, path}); it != routes_.end())
                 {
                 return it->second;
@@ -157,13 +165,13 @@ class Router
         struct Hash {
             std::size_t operator()(const std::pair<RequestType, std::string>& p) const {
                 const std::size_t h1 = std::hash<int>()
-                    (std::to_underlying(p.first)); //Sonar Qube: Use "std::to_underlying" to cast enums to their underlying type. Link: https://en.cppreference.com/w/cpp/types/underlying_type
+                    (std::to_underlying(p.first)); //! Sonar Qube: Use "std::to_underlying" to cast enums to their underlying type. Link: https://en.cppreference.com/w/cpp/types/underlying_type
                 const std::size_t h2 = std::hash<std::string>()(p.second);
                 return h1 ^ (h2 << 1);
             }
         };
 
-        // Hashing the map
+        //* Hashing the map
         std::unordered_map<std::pair<RequestType, std::string>, RouteHandler, Hash> routes_;
 };
 
@@ -182,7 +190,7 @@ public:
 
 
         constexpr int reuse = 1;
-        // Setting Socket Options. This allows reusing the same address multiple times
+        //* Setting Socket Options. This allows reusing the same address multiple times
         if (setsockopt(serverFd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
             {
                 throw SocketCreationException("Socket option set failed");
@@ -201,25 +209,25 @@ public:
             throw BindException(std::string("Bind failed: ") + std::strerror(errno));
         }
 
-        // start listening to incoming connections
+        //* start listening to incoming connections
         if (listen(serverFd_, 5) != 0)
         {
             throw ListenException("Listen failed");
         }
     }
-    // Copy constructor (we cannot safely copy this, that is why we use delete)
+    //* Copy constructor (we cannot safely copy this, that is why we use delete)
     TcpServer(const TcpServer&) = delete;
 
-    // Copy assignment, also unsafe
+    //* Copy assignment, also unsafe
     TcpServer& operator=(const TcpServer&) = delete;
 
-    // We can move it, but first we set others serverFd_ to minus one so the destructor won't close the second socket again
+    //* We can move it, but first we set others serverFd_ to minus one so the destructor won't close the second socket again
     TcpServer(TcpServer&& other) noexcept
     : serverFd_(other.serverFd_), router_(other.router_) {
         other.serverFd_ = -1;
     }
 
-    // Closing existing socket then moving TCPSERVER
+    //* Closing existing socket then moving TCPSERVER
     TcpServer& operator=(TcpServer&& other) noexcept {
         if (this != &other) {
             if (serverFd_ >= 0) {
@@ -232,34 +240,33 @@ public:
         return *this;
     }
 
-    // Closing the socket after destruction of the class
+    //* Closing the socket after destruction of the class
     ~TcpServer() {
         if (serverFd_ >= 0) {
             ::close(serverFd_);
         }
     }
 
-    void run() const {
+    void run() {
 
-        // Ask professor about "jthread" xd
+        //? Ask professor about "jthread"
         std::vector<std::thread> serverThreads;
 
-        //TODO: free the threads after closing the server or add closing the thread
         while (running_) {
-            sockaddr_in clientAddr{}; // stores information about the client
-            socklen_t socklen = sizeof(clientAddr); // length of the client address structure
+            sockaddr_in clientAddr{}; //* stores information about the client
+            socklen_t socklen = sizeof(clientAddr); //* length of the client address structure
             int const clientFd = accept(serverFd_, reinterpret_cast<sockaddr*>(&clientAddr), &socklen); // wait for client to connect
             if (clientFd< 0)
             {
-                throw AcceptException("Accept failed"); // check if accept was successful
+                throw AcceptException("Accept failed"); //* check if accept was successful
             }
 
 
-            serverThreads.emplace_back([this, clientFd]() {handleClient(clientFd);});//allows thread to run independently of the main thread
+            serverThreads.emplace_back([this, clientFd]() {handleClient(clientFd);});//*allows thread to run independently of the main thread
 
 
         }
-        //Joins all the threads after the execution of the server
+        //*Joins all the threads after the execution of the server
         for (auto& thread : serverThreads)
         {
             if (thread.joinable())
@@ -282,55 +289,87 @@ private:
     // Mutexes
     inline static std::mutex m_request;
 
-    void handleClient(int clientFd) const
+    void handleClient(int clientFd)
     {
-        //Ask professor about using scopelock instead of lockguard
+        //? Ask professor about using scopelock instead of lock_guard
         std::lock_guard<std::mutex> lock(m_request);
-        const std::string request = readRequest(clientFd); // read the request from the client
-        std::cout << "Received request:\n" << request << '\n'; // print the request
+
+
+        while (true)
+        {
+            const std::string request = readRequest(clientFd);
+
+            if (request.empty())
+            {
+                break;
+            }
+            std::istringstream iss(request);
+            std::string method;
+            std::string path;
+            std::string version;
+
+            //* Skipping the whitespace and getting the next character after the white space
+            iss >> method >> path >> version;
+
+            //* Parsing the headers
+            std::unordered_map<std::string, std::string> headers;
+            std::string line;
+            std::getline(iss, line);  //* Reading characters from input stream and placing them into string:
+            //https://en.cppreference.com/w/cpp/string/basic_string/getline
+
+            //* "Connection: keep-alive" -> headers["connection"] = "keep-alive"
+            while (std::getline(iss, line) && line != "\r" && !line.empty())
+            {
+                if (const auto currentPos = line.find(':'); currentPos != std::string::npos)
+                {
+                    std::string key = trim(line.substr(0, currentPos));
+                    const std::string value = trim(line.substr(currentPos + 1));
+
+                    std::ranges::transform(key, key.begin(), [](const unsigned char c) { return std::tolower(c); });
+
+                    headers[key] = value;
+                }
+            }
 
             try
             {
-                std::cout << request << '\n';
-                std::string method;
-                std::string path;
-                std::string version;
-                std::istringstream stream(request);
-                stream >> method >> path >> version;
-
-                RequestType const type = toRequestType(method);
-                std::string const body = extractBody(request);
-                RouteHandler const routeHandler = router_.getHandler(type, path);
+                const RequestType type = toRequestType(method);
+                const std::string body = extractBody(request);
+                const RouteHandler routeHandler = router_.getHandler(type, path);
 
                 std::string response;
-                if (routeHandler) {
-
-                    std::string const content = routeHandler(path, body);
+                if (routeHandler)
+                {
+                    const std::string content = routeHandler(path, body);
                     std::ostringstream oss;
                     oss << "HTTP/1.1 200 OK\r\n"
                         << "Content-Type: text/plain\r\n"
                         << "Content-Length: " << content.size() << "\r\n"
-                        << "Connection: close\r\n\r\n"
+                        << "Connection: " << (shouldKeepAlive(version, headers) ? "keep-alive" : "close") << "\r\n\r\n"
                         << content;
 
                     response = oss.str();
                     send(clientFd, response.c_str(), response.size(), 0);
-
-                } else {
+                    std::cout << "Connection header: " << headers["connection"] << '\n';
+                    std::cout << "Will keep alive: " << std::boolalpha << shouldKeepAlive(version, headers) << '\n';
+                }
+                else
+                {
                     response = "HTTP/1.1 404 Not Found\r\n\r\nRoute not found";
                 }
 
                 send(clientFd, response.c_str(), response.size(), 0);
-
-            } catch (HandlerException&)
+            }
+            catch (HandlerException &)
             {
                 const std::string response500 = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
                 send(clientFd, response500.c_str(), response500.size(), 0);
             }
-        close(clientFd);
+            close(clientFd);
         }
-    // extract body from request
-    // SonarQube: Replace this const reference to "std::string" by a "std::string_view": https://en.cppreference.com/w/cpp/string/basic_string_view
+    }
+    //* extract body from request
+    //! SonarQube: Replace this const reference to "std::string" by a "std::string_view": https://en.cppreference.com/w/cpp/string/basic_string_view
     static std::string extractBody(const std::string& request) {
         if (const auto pos = request.find("\r\n\r\n"); pos != std::string::npos) {
             return request.substr(pos + 4);
@@ -338,15 +377,8 @@ private:
         return "";
     }
 
+
     // reads the whole request
-    static std::string readRequest(const int fd) {
-        std::vector<char> buffer(4096);
-        if (const ssize_t bytes = recv(fd, buffer.data(), buffer.size() - 1, 0); bytes > 0) {
-            buffer[bytes] = '\0';
-            return {buffer.data()};
-        }
-        return {};
-    }
 
     //Useless right now but keep it just in case xD
     // //Check if path exists on the server
