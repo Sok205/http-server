@@ -15,7 +15,7 @@
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
-
+//? ask about proper header file usage xd
 using RouteHandler = std::function<std::string(const std::string&, const std::string&)>;
 
 //----------------------------Requests---------------------------------
@@ -249,8 +249,6 @@ public:
 
     void run() {
 
-        //? Ask professor about "jthread"
-        std::vector<std::thread> serverThreads;
 
         while (running_) {
             sockaddr_in clientAddr{}; //* stores information about the client
@@ -258,16 +256,24 @@ public:
             int const clientFd = accept(serverFd_, reinterpret_cast<sockaddr*>(&clientAddr), &socklen); // wait for client to connect
             if (clientFd< 0)
             {
-                throw AcceptException("Accept failed"); //* check if accept was successful
+                if (running_)
+                {
+                    throw AcceptException("Accept failed"); //* check if accept was successful
+                }
+                break;
             }
 
+            cleanupFinishedThreads();
 
-            serverThreads.emplace_back([this, clientFd]() {handleClient(clientFd);});//*allows thread to run independently of the main thread
-
-
+            {
+                std::lock_guard<std::mutex> lock(threadMutex_);
+                serverThreads_.emplace_back([this, clientFd]() {
+                    handleClient(clientFd);
+                });
+            }
         }
         //*Joins all the threads after the execution of the server
-        for (auto& thread : serverThreads)
+        for (auto& thread : serverThreads_)
         {
             if (thread.joinable())
             {
@@ -287,12 +293,24 @@ private:
     Router& router_;
 
     // Mutexes
-    inline static std::mutex m_request;
+    std::mutex threadMutex_;
+
+
+
+    //? Ask professor about "jthread" and about this thread aproach
+    std::vector<std::thread> serverThreads_;
+
+    void cleanupFinishedThreads() {
+        //? Ask about scoped lock
+        std::lock_guard<std::mutex> lock(threadMutex_);
+        std::erase_if(serverThreads_,
+                      [](const std::thread& t) {
+                          return !t.joinable();
+                      });
+        };
 
     void handleClient(int clientFd)
     {
-        //? Ask professor about using scopelock instead of lock_guard
-        std::lock_guard<std::mutex> lock(m_request);
 
 
         while (true)
@@ -357,20 +375,19 @@ private:
                 {
                     response = "HTTP/1.1 404 Not Found\r\n\r\nRoute not found";
                 }
-
-                send(clientFd, response.c_str(), response.size(), 0);
             }
             catch (HandlerException &)
             {
                 const std::string response500 = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
                 send(clientFd, response500.c_str(), response500.size(), 0);
             }
-            close(clientFd);
         }
+            close(clientFd);
     }
+
     //* extract body from request
     //! SonarQube: Replace this const reference to "std::string" by a "std::string_view": https://en.cppreference.com/w/cpp/string/basic_string_view
-    static std::string extractBody(const std::string& request) {
+        std::string extractBody(const std::string& request) {
         if (const auto pos = request.find("\r\n\r\n"); pos != std::string::npos) {
             return request.substr(pos + 4);
         }
