@@ -2,10 +2,12 @@ cmake_minimum_required(VERSION 3.13)
 
 project(http-server-starter-cpp)
 
-file(GLOB_RECURSE SOURCE_FILES src/*.cpp src/*.hpp)
+file(GLOB_RECURSE SOURCE_FILES src/*.cpp)
 
 set(CMAKE_CXX_STANDARD 23) # Enable the C++23 standard
 set(THREADS_PREFER_PTHREAD_FLAG ON)
+
+include_directories(${CMAKE_SOURCE_DIR}/include)
 
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)
