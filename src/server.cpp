@@ -1,13 +1,17 @@
 #include "server/server.hpp"
+
+#include <__chrono/calendar.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <iostream>
+#include <mutex>
+#include <stdexcept>
+#include <thread>
+
 #include "server/exceptions.hpp"
 #include "server/utils.hpp"
-#include <arpa/inet.h>
-#include <iostream>
-#include <stdexcept>
-#include <sys/socket.h>
-#include <thread>
-#include <unistd.h>
-#include <mutex>
 
 // ———  toRequestType  —————————————
 RequestType toRequestType(const std::string& requestT) {
@@ -159,8 +163,41 @@ void TcpServer::cleanupFinishedThreads() {
     });
 }
 
+//* function to block to many requests. Prevents ddos attacks
+bool TcpServer::blockTooManyRequests(const std::string& ip)
+{
+    std::lock_guard lock(ipMutex_);
+    const auto now = std::chrono::steady_clock::now();
+    if (auto it = lastIp_.find(ip); it != lastIp_.end() && now - it->second < std::chrono::milliseconds(100)) {
+        return true; // too soon!
+    }
+    lastIp_[ip] = now;
+    return false;
+}
+
 void TcpServer::handleClient(int clientFd)
 {
+    // Atomic clock implementation
+    sockaddr_in clientAddr{};
+    socklen_t addrLen = sizeof(clientAddr);
+    //*getpeername -> return peer address of connected socket (https://pubs.opengroup.org/onlinepubs/007904875/functions/getpeername.html)
+    getpeername(clientFd, reinterpret_cast<sockaddr*>(&clientAddr), &addrLen);
+
+    // allocating buffer space to store Ipv4 address
+    std::string clientIP(INET_ADDRSTRLEN, '\0');
+    // converting the ip address from binary to 'human' xd
+    inet_ntop(AF_INET, &clientAddr.sin_addr, clientIP.data(), INET_ADDRSTRLEN);
+    clientIP.resize(std::strlen(clientIP.c_str()));
+
+    if (blockTooManyRequests(clientIP))
+    {
+        const std::string response = "HTTP/1.1 429 Too Many Requests\r\n\r\n";
+        send(clientFd, response.data(), response.size(), 0);
+        close(clientFd);
+        return;
+    }
+
+
     while (true) {
         const std::string request = utils::readRequest(clientFd);
 

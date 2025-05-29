@@ -40,5 +40,38 @@ namespace utils
             return conn == "keep-alive";
         }
         return false;
-};
-} // namespace utils
+    };
+    //These are used for transparent lookup. This will allow us
+    //to skip the conversion inside the unordered map
+    //we will not use as much memory
+    //sonarqube is the GOAT
+    //Example
+    /*
+        ipLastSeen_.find("192.168.0.1");
+        ipLastSeen_.find(std::string_view("192.168.0.1"));
+        ipLastSeen_.find(std::string("192.168.0.1"));
+     */
+    //They all work without copying right now :>
+    struct TransparentHash {
+        using IsTransparent = void;
+
+        size_t operator()(std::string_view sv) const noexcept {
+            return std::hash<std::string_view>{}(sv);
+        }
+
+        size_t operator()(const std::string& s) const noexcept {
+            return std::hash<std::string>{}(s);
+        }
+
+        size_t operator()(const char* s) const noexcept {
+            return std::hash<std::string_view>{}(s);
+        }
+    };
+
+    struct TransparentEqual {
+        using IsTransparent = void;
+        bool operator()(std::string_view lhs, std::string_view rhs) const noexcept {
+            return lhs == rhs;
+        }
+    };
+    } // namespace utils

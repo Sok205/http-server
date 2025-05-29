@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <thread>
-#
+#include <server/utils.hpp>
 
 
 class Router;
@@ -94,6 +94,15 @@ public:
 private:
     int serverFd_;
     Router& router_;
+    // ! Don't know how to make it work xd
+    std::unordered_map<
+        std::string,
+        std::chrono::steady_clock::time_point,
+        utils::TransparentHash,
+        utils::TransparentEqual
+    > lastIp_;
+
+    std::mutex ipMutex_;
 
     std::atomic<bool> running_{true};
     std::mutex threadMutex_;
@@ -102,5 +111,6 @@ private:
 
     void cleanupFinishedThreads();
     void handleClient(int clientFd);
+    bool blockTooManyRequests(const std::string& ip);
     std::string extractBody(const std::string& request);
 };
