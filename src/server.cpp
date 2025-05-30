@@ -12,6 +12,8 @@
 
 #include "server/exceptions.hpp"
 #include "server/utils.hpp"
+#include "tracy/Tracy.hpp"
+
 
 // ———  toRequestType  —————————————
 RequestType toRequestType(const std::string& requestT) {
@@ -181,6 +183,7 @@ bool TcpServer::blockTooManyRequests(const std::string& ip)
 }
 
 void TcpServer::workerLoop() {
+    tracy::SetThreadName("Worker");
     const auto threadId = std::this_thread::get_id();
     {
         std::lock_guard lock(loggingMutex_);
@@ -209,7 +212,7 @@ void TcpServer::workerLoop() {
 
 void TcpServer::handleClient(int clientFd)
 {
-
+    tracy::SetThreadName("ClientHandler");
     {
         std::lock_guard lock(loggingMutex_);
         std::cout << "[HANDLE] Thread" << std::this_thread::get_id() << " handling client fd = " << clientFd << '\n';
