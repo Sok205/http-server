@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/zsh
 
 # ─── CONFIG ─────────────────────────────────────────────
 SCRIPT="send_request.py"

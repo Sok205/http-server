@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/zsh
 
 echo "First request (should pass):"
 curl -i http://localhost:4222/hello

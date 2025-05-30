@@ -109,8 +109,24 @@ private:
     //? jthread implementation
     std::vector<std::thread> serverThreads_;
 
+    //*Dispatcher implementiation
+    std::queue<int> clientQueue_;
+    std::mutex clientQueueMutex_;
+    std::condition_variable clientQueueCond_; //? https://en.cppreference.com/w/cpp/thread/condition_variable.html
+    std::thread dispatcherThread_;
+    std::vector<std::thread> workerThreads_;
+    void workerLoop();
+    bool stop_ = false;
+    void dispatchLoop();
+
+    //*Loggin
+    std::mutex loggingMutex_;
+
+
     void cleanupFinishedThreads();
     void handleClient(int clientFd);
     bool blockTooManyRequests(const std::string& ip);
     std::string extractBody(const std::string& request);
+
+
 };

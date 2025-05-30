@@ -109,10 +109,15 @@ TcpServer::TcpServer(uint16_t port, Router& router)
 }
 
 TcpServer::~TcpServer() {
-    if (serverFd_ >= 0)
     {
-        ::close(serverFd_);
+        std::lock_guard lock(clientQueueMutex_);
+        stop_ = true;
     }
+    clientQueueCond_.notify_all();
+    for (auto& t : workerThreads_) {
+        if (t.joinable()) t.join();
+    }
+    if (serverFd_ >= 0) ::close(serverFd_);
 }
 
 TcpServer::TcpServer(TcpServer&& other) noexcept
@@ -136,23 +141,23 @@ TcpServer& TcpServer::operator=(TcpServer&& other) noexcept {
 }
 
 void TcpServer::run() {
+    //* Setting the number of dispatcher threads
+    int numWorkers = 1;
+    for (int i = 0; i < numWorkers; ++i) {
+        workerThreads_.emplace_back([this] { this->workerLoop(); });
+    }
+
     while (true) {
         sockaddr_in clientAddr{};
         socklen_t len = sizeof(clientAddr);
-        int const fd  = accept(serverFd_, reinterpret_cast<sockaddr*>(&clientAddr), &len);
-        if (fd < 0)
+        int fd = accept(serverFd_, reinterpret_cast<sockaddr*>(&clientAddr), &len);
+        if (fd < 0) continue;
+
         {
-            break;
+            std::lock_guard lock(clientQueueMutex_);
+            clientQueue_.push(fd);
         }
-        cleanupFinishedThreads();
-        serverThreads_.emplace_back([this,fd]{ handleClient(fd); });
-    }
-    for (auto& t : serverThreads_)
-    {
-        if (t.joinable())
-        {
-            t.join();
-        }
+        clientQueueCond_.notify_one();
     }
 }
 
@@ -175,8 +180,40 @@ bool TcpServer::blockTooManyRequests(const std::string& ip)
     return false;
 }
 
+void TcpServer::workerLoop() {
+    const auto threadId = std::this_thread::get_id();
+    {
+        std::lock_guard lock(loggingMutex_);
+        std::cout << "[DISPATCH] Worker started: Thread ID = " << threadId << '\n';
+    }
+
+    while (true) {
+        int clientFd;
+        {
+            std::unique_lock lock(clientQueueMutex_);
+            clientQueueCond_.wait(lock, [this] {
+                return stop_ || !clientQueue_.empty();
+            });
+            if (stop_ && clientQueue_.empty()) return;
+            clientFd = clientQueue_.front();
+            clientQueue_.pop();
+        }
+
+        {
+            std::lock_guard lock(loggingMutex_);
+            std::cout << "[DISPATCH] Worker Thread " << threadId << " handling client fd = " << clientFd << '\n';
+        }
+        handleClient(clientFd);
+    }
+}
+
 void TcpServer::handleClient(int clientFd)
 {
+
+    {
+        std::lock_guard lock(loggingMutex_);
+        std::cout << "[HANDLE] Thread" << std::this_thread::get_id() << " handling client fd = " << clientFd << '\n';
+    }
     // Atomic clock implementation
     sockaddr_in clientAddr{};
     socklen_t addrLen = sizeof(clientAddr);
@@ -193,8 +230,6 @@ void TcpServer::handleClient(int clientFd)
     {
         const std::string response = "HTTP/1.1 429 Too Many Requests\r\n\r\n";
         send(clientFd, response.data(), response.size(), 0);
-        close(clientFd);
-        return;
     }
 
 
@@ -253,6 +288,11 @@ void TcpServer::handleClient(int clientFd)
         }
     }
 
+    if (clientFd < 0) {
+        std::cerr << "[ERROR] Invalid clientFd\n";
+        return;
+    }
+
     close(clientFd);
 }
 
@@ -261,6 +301,29 @@ std::string TcpServer::extractBody(const std::string& request) {
     return pos==std::string::npos ? "" : request.substr(pos+4);
 }
 
+void::TcpServer::dispatchLoop()
+{
+    while (true)
+    {
+        int clientFd;
+        {
+            //* Pulling socket from the thread, then removing it from queue and handling
+            //* returning from wait
+            std::unique_lock lock(clientQueueMutex_);
+            //* [this] capturing the current pointer to client
+            clientQueueCond_.wait(lock, [this] {
+                return !clientQueue_.empty();
+            });
+
+            clientFd = clientQueue_.front();
+            clientQueue_.pop();
+        }
+        cleanupFinishedThreads();
+        serverThreads_.emplace_back([this, clientFd] {
+            handleClient(clientFd);
+        });
+    }
+}
 
 
 int main() {
@@ -269,24 +332,39 @@ int main() {
      *maybe not doing everythin inside hpp file
      */
     try {
-        Router router;
-        router.addRoute(RequestType::GET, "/hello", [](const std::string&, const std::string&) {
-            return "Hello from /hello!";
+        Router routerA, routerB;
+        routerA.addRoute(RequestType::GET, "/hello", [](const std::string&, const std::string&) {
+            return "Hello from portA !";
         });
 
-        router.addRoute(RequestType::PUT, "/goodbye", [](const std::string&, const std::string&) {
-            return "Goodbye from /goodbye!";
+        routerA.addRoute(RequestType::PUT, "/goodbye", [](const std::string&, const std::string&) {
+            return "Goodbye from Port A!";
         });
 
-        TcpServer server(4222, router);
+        routerB.addRoute(RequestType::GET, "/hello", [](const std::string&, const std::string&) {
+            return "Hello from portB !";
+        });
+        TcpServer serverA(4222, routerA);
+        TcpServer serverB(4444, routerB);
         std::cout << "Waiting for a client to connect...\n";
 
-        std::thread serverThread([&server]() {
-            server.run();
+        std::thread serverAThread([&serverA]() {
+            serverA.run();
         });
 
+        std::thread serverBThread([&serverB]() {
+            serverB.run();
+        });
 
-        serverThread.join();
+        if (serverAThread.joinable())
+        {
+            serverAThread.join();
+        }
+
+        if (serverBThread.joinable())
+        {
+            serverBThread.join();
+        }
 
     } catch (const std::exception& ex) {
         std::cerr << ex.what() << std::endl;
