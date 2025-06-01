@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 #include <server/utils.hpp>
+#include <tracy/Tracy.hpp>
 
 
 class Router;

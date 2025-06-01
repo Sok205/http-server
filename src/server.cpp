@@ -191,7 +191,9 @@ bool TcpServer::blockTooManyRequests(const std::string& ip)
 }
 
 void TcpServer::workerLoop() {
-    tracy::SetThreadName("Worker");
+
+    tracy::SetThreadName("WorkerLoop");
+    ZoneScoped;
     const auto threadId = std::this_thread::get_id();
     {
         const std::lock_guard lock(loggingMutex_);
@@ -201,11 +203,15 @@ void TcpServer::workerLoop() {
     while (true) {
         int clientFd = 0;
         {
+            ZoneScopedN("LockClientQueue");
             std::unique_lock lock(clientQueueMutex_);
             clientQueueCond_.wait(lock, [this] {
                 return stop_ || !clientQueue_.empty();
             });
-            if (stop_ && clientQueue_.empty()) return;
+            if (stop_ && clientQueue_.empty())
+            {
+                return;
+            }
             clientFd = clientQueue_.front();
             clientQueue_.pop();
         }
@@ -220,8 +226,10 @@ void TcpServer::workerLoop() {
 
 void TcpServer::handleClient(int clientFd)
 {
-    tracy::SetThreadName("ClientHandler");
+    tracy::SetThreadName("HandleClient");
+    ZoneScoped;
     {
+        ZoneScopedN("LockClientQueue");
         const std::lock_guard lock(loggingMutex_);
         std::cout << "[HANDLE] Thread" << std::this_thread::get_id() << " handling client fd = " << clientFd << '\n';
     }
@@ -307,7 +315,7 @@ void TcpServer::handleClient(int clientFd)
     close(clientFd);
 }
 
-const auto TcpServer::extractBody(const std::string &request) -> std::string
+auto TcpServer::extractBody(const std::string &request) -> std::string
 {
     auto pos = request.find("\r\n\r\n");
     return pos==std::string::npos ? "" : request.substr(pos+4);
@@ -315,12 +323,15 @@ const auto TcpServer::extractBody(const std::string &request) -> std::string
 
 auto ::TcpServer::dispatchLoop() -> void
 {
+    tracy::SetThreadName("Dispatcher");
+    ZoneScoped;
     while (true)
     {
         int clientFd = 0;
         {
             //* Pulling socket from the thread, then removing it from queue and handling
             //* returning from wait
+            ZoneScopedN("TcpServer::dispatchLoop");
             std::unique_lock lock(clientQueueMutex_);
             //* [this] capturing the current pointer to client
             clientQueueCond_.wait(lock, [this] {
