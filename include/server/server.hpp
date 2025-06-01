@@ -126,7 +126,7 @@ private:
     void cleanupFinishedThreads();
     void handleClient(int clientFd);
     bool blockTooManyRequests(const std::string& ip);
-    std::string extractBody(const std::string& request);
+    static std::string extractBody(const std::string& request);
 
 
 };

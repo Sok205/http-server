@@ -112,14 +112,19 @@ TcpServer::TcpServer(uint16_t port, Router& router)
 
 TcpServer::~TcpServer() {
     {
-        std::lock_guard lock(clientQueueMutex_);
+        std::lock_guard const lock(clientQueueMutex_);
         stop_ = true;
     }
     clientQueueCond_.notify_all();
-    for (auto& t : workerThreads_) {
-        if (t.joinable()) t.join();
+    for (std::thread &t : workerThreads_)
+    {
+        if (t.joinable())
+        {
+            t.join();
+        }
     }
-    if (serverFd_ >= 0) ::close(serverFd_);
+    if (serverFd_ >= 0) { ::close(serverFd_);
+}
 }
 
 TcpServer::TcpServer(TcpServer&& other) noexcept
@@ -142,9 +147,10 @@ TcpServer& TcpServer::operator=(TcpServer&& other) noexcept {
     return *this;
 }
 
-void TcpServer::run() {
+auto TcpServer::run() -> void
+{
     //* Setting the number of dispatcher threads
-    int numWorkers = 1;
+    constexpr int numWorkers = 1;
     for (int i = 0; i < numWorkers; ++i) {
         workerThreads_.emplace_back([this] { this->workerLoop(); });
     }
@@ -152,11 +158,13 @@ void TcpServer::run() {
     while (true) {
         sockaddr_in clientAddr{};
         socklen_t len = sizeof(clientAddr);
-        int fd = accept(serverFd_, reinterpret_cast<sockaddr*>(&clientAddr), &len);
-        if (fd < 0) continue;
-
+        int const fd = accept(serverFd_, reinterpret_cast<sockaddr*>(&clientAddr), &len);
+        if (fd < 0)
         {
-            std::lock_guard lock(clientQueueMutex_);
+            continue;
+        }
+        {
+            const std::lock_guard lock(clientQueueMutex_);
             clientQueue_.push(fd);
         }
         clientQueueCond_.notify_one();
@@ -164,7 +172,7 @@ void TcpServer::run() {
 }
 
 void TcpServer::cleanupFinishedThreads() {
-    std::lock_guard lock(threadMutex_);
+    const std::lock_guard lock(threadMutex_);
     erase_if(serverThreads_, [](const std::thread& t) {
         return !t.joinable();
     });
@@ -173,9 +181,9 @@ void TcpServer::cleanupFinishedThreads() {
 //* function to block to many requests. Prevents ddos attacks
 bool TcpServer::blockTooManyRequests(const std::string& ip)
 {
-    std::lock_guard lock(ipMutex_);
+    const std::lock_guard lock(ipMutex_);
     const auto now = std::chrono::steady_clock::now();
-    if (auto it = lastIp_.find(ip); it != lastIp_.end() && now - it->second < std::chrono::milliseconds(100)) {
+    if (const auto it = lastIp_.find(ip); it != lastIp_.end() && now - it->second < std::chrono::milliseconds(100)) {
         return true; // too soon!
     }
     lastIp_[ip] = now;
@@ -186,12 +194,12 @@ void TcpServer::workerLoop() {
     tracy::SetThreadName("Worker");
     const auto threadId = std::this_thread::get_id();
     {
-        std::lock_guard lock(loggingMutex_);
+        const std::lock_guard lock(loggingMutex_);
         std::cout << "[DISPATCH] Worker started: Thread ID = " << threadId << '\n';
     }
 
     while (true) {
-        int clientFd;
+        int clientFd = 0;
         {
             std::unique_lock lock(clientQueueMutex_);
             clientQueueCond_.wait(lock, [this] {
@@ -203,7 +211,7 @@ void TcpServer::workerLoop() {
         }
 
         {
-            std::lock_guard lock(loggingMutex_);
+            const std::lock_guard lock(loggingMutex_);
             std::cout << "[DISPATCH] Worker Thread " << threadId << " handling client fd = " << clientFd << '\n';
         }
         handleClient(clientFd);
@@ -214,7 +222,7 @@ void TcpServer::handleClient(int clientFd)
 {
     tracy::SetThreadName("ClientHandler");
     {
-        std::lock_guard lock(loggingMutex_);
+        const std::lock_guard lock(loggingMutex_);
         std::cout << "[HANDLE] Thread" << std::this_thread::get_id() << " handling client fd = " << clientFd << '\n';
     }
     // Atomic clock implementation
@@ -299,16 +307,17 @@ void TcpServer::handleClient(int clientFd)
     close(clientFd);
 }
 
-std::string TcpServer::extractBody(const std::string& request) {
+const auto TcpServer::extractBody(const std::string &request) -> std::string
+{
     auto pos = request.find("\r\n\r\n");
     return pos==std::string::npos ? "" : request.substr(pos+4);
 }
 
-void::TcpServer::dispatchLoop()
+auto ::TcpServer::dispatchLoop() -> void
 {
     while (true)
     {
-        int clientFd;
+        int clientFd = 0;
         {
             //* Pulling socket from the thread, then removing it from queue and handling
             //* returning from wait
@@ -330,12 +339,9 @@ void::TcpServer::dispatchLoop()
 
 
 int main() {
-    /*Todo:
-     *add more logs to the server
-     *maybe not doing everythin inside hpp file
-     */
     try {
-        Router routerA, routerB;
+        Router routerA;
+        Router routerB;
         routerA.addRoute(RequestType::GET, "/hello", [](const std::string&, const std::string&) {
             return "Hello from portA !";
         });
@@ -370,7 +376,7 @@ int main() {
         }
 
     } catch (const std::exception& ex) {
-        std::cerr << ex.what() << std::endl;
+        std::cerr << ex.what() << '\n';
         return 1;
     }
     return 0;
