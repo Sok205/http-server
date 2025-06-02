@@ -12,10 +12,6 @@
 #include <stdexcept>
 #include <thread>
 
-
-
-
-// ———  toRequestType  —————————————
 static router::RequestType toRequestType(const std::string& requestT) {
     using enum router::RequestType;
     if (requestT == "GET")    {return GET;}
@@ -25,7 +21,7 @@ static router::RequestType toRequestType(const std::string& requestT) {
     throw std::invalid_argument("Invalid request type: " + requestT);
 }
 
-// ———  RequestHandlerFactory  —————————————
+
 std::unique_ptr<router::RequestHandler>
 router::RequestHandlerFactory::createHandler(const RequestType type) {
     switch (type) {
@@ -38,7 +34,7 @@ router::RequestHandlerFactory::createHandler(const RequestType type) {
     throw std::invalid_argument("Unsupported request type");
 }
 
-// ———  GET/POST/PUT/DELETE handlers  —————————————
+
 std::string router::GETHandler::handler(const std::string& path,const std::string&body){
     return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nGET: " + path + "\n" + body;
 }
@@ -69,7 +65,7 @@ router::RequestType router::DELETEHandler::getType() const {
 }
 
 
-// ———  Router  —————————————
+
 void router::Router::addRoute(RequestType type, const std::string& path, RouteHandler handler) {
     routes_[{type, path}] = std::move(handler);
 }
@@ -80,7 +76,6 @@ router::RouteHandler router::Router::getHandler(RequestType type, const std::str
 }
 
 
-// ———  TcpServer implementation  —————————————
 server::TcpServer::TcpServer(uint16_t port, router::Router& router)
   : serverFd_(::socket(AF_INET, SOCK_STREAM, 0)), router_(router)
 {
@@ -151,7 +146,7 @@ auto server::TcpServer::run() -> void
 {
     ZoneScoped; //NOLINT
     //* Setting the number of dispatcher threads
-    constexpr int numWorkers = 1;
+    constexpr int numWorkers = 4;
     for (int i = 0; i < numWorkers; ++i) {
         workerThreads_.emplace_back([this] { this->workerLoop(); });
     }
@@ -174,7 +169,8 @@ auto server::TcpServer::run() -> void
     }
 }
 
-void server::TcpServer::cleanupFinishedThreads() {
+void server::TcpServer::cleanupFinishedThreads()
+{
     const std::lock_guard lock(threadMutex_);
     erase_if(serverThreads_, [](const std::thread& t) {
         return !t.joinable();
@@ -186,14 +182,15 @@ bool server::TcpServer::blockTooManyRequests(const std::string& ip)
 {
     const std::lock_guard lock(ipMutex_);
     const auto now = std::chrono::steady_clock::now();
-    if (const auto it = lastIp_.find(ip); it != lastIp_.end() && now - it->second < std::chrono::milliseconds(100)) {
-        return true; // too soon!
+    if (const auto it = lastIp_.find(ip); it != lastIp_.end() && now - it->second < std::chrono::milliseconds(1)) {
+        return true;
     }
     lastIp_[ip] = now;
     return false;
 }
 
-void server::TcpServer::workerLoop() {
+void server::TcpServer::workerLoop()
+{
 
     tracy::SetThreadName("WorkerThread");
     ZoneScoped; //NOLINT
@@ -357,7 +354,8 @@ auto server::TcpServer::dispatchLoop() -> void
 }
 
 
-int main() {
+int main()
+{
     tracy::SetThreadName("MainThread");
     ZoneScoped; //NOLINT
     try {
@@ -388,6 +386,7 @@ int main() {
         });
 
         std::thread serverBThread([&serverB]() {
+            tracy::SetThreadName("TcpServer::serverBThread");
             ZoneScoped; //NOLINT
             serverB.run();
         });
