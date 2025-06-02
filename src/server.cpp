@@ -149,6 +149,7 @@ TcpServer& TcpServer::operator=(TcpServer&& other) noexcept {
 
 auto TcpServer::run() -> void
 {
+    ZoneScoped;
     //* Setting the number of dispatcher threads
     constexpr int numWorkers = 1;
     for (int i = 0; i < numWorkers; ++i) {
@@ -156,6 +157,7 @@ auto TcpServer::run() -> void
     }
 
     while (true) {
+        ZoneScopedN("AcceptConnection");
         sockaddr_in clientAddr{};
         socklen_t len = sizeof(clientAddr);
         int const fd = accept(serverFd_, reinterpret_cast<sockaddr*>(&clientAddr), &len);
@@ -164,6 +166,7 @@ auto TcpServer::run() -> void
             continue;
         }
         {
+            ZoneScopedN("QueueClient");
             const std::lock_guard lock(clientQueueMutex_);
             clientQueue_.push(fd);
         }
@@ -192,7 +195,7 @@ bool TcpServer::blockTooManyRequests(const std::string& ip)
 
 void TcpServer::workerLoop() {
 
-    tracy::SetThreadName("WorkerLoop");
+    tracy::SetThreadName("WorkerThread");
     ZoneScoped;
     const auto threadId = std::this_thread::get_id();
     {
@@ -203,7 +206,7 @@ void TcpServer::workerLoop() {
     while (true) {
         int clientFd = 0;
         {
-            ZoneScopedN("LockClientQueue");
+            ZoneScopedN("WaitForClient");
             std::unique_lock lock(clientQueueMutex_);
             clientQueueCond_.wait(lock, [this] {
                 return stop_ || !clientQueue_.empty();
@@ -226,10 +229,9 @@ void TcpServer::workerLoop() {
 
 void TcpServer::handleClient(int clientFd)
 {
-    tracy::SetThreadName("HandleClient");
-    ZoneScoped;
+    ZoneScopedN("TcpServer::handleClient");
     {
-        ZoneScopedN("LockClientQueue");
+        ZoneScopedN("GetClientInfo");
         const std::lock_guard lock(loggingMutex_);
         std::cout << "[HANDLE] Thread" << std::this_thread::get_id() << " handling client fd = " << clientFd << '\n';
     }
@@ -247,12 +249,16 @@ void TcpServer::handleClient(int clientFd)
 
     if (blockTooManyRequests(clientIP))
     {
+        ZoneScopedN("RateLimit");
         const std::string response = "HTTP/1.1 429 Too Many Requests\r\n\r\n";
         send(clientFd, response.data(), response.size(), 0);
+        close(clientFd);
+        return;
     }
 
 
     while (true) {
+        ZoneScopedN("ProcessRequest");
         const std::string request = utils::readRequest(clientFd);
 
         if (request.empty()) {
@@ -279,6 +285,7 @@ void TcpServer::handleClient(int clientFd)
         }
 
         try {
+            ZoneScopedN("HandleRoute");
             const RequestType type = toRequestType(method);
             const std::string body = extractBody(request);
             const RouteHandler routeHandler = router_.getHandler(type, path);
@@ -302,6 +309,7 @@ void TcpServer::handleClient(int clientFd)
                 send(clientFd, response.c_str(), response.size(), 0);
             }
         } catch (HandlerException&) {
+            ZoneScopedN("HandleError");
             const std::string response500 = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
             send(clientFd, response500.c_str(), response500.size(), 0);
         }
@@ -350,18 +358,23 @@ auto ::TcpServer::dispatchLoop() -> void
 
 
 int main() {
+    tracy::SetThreadName("MainThread");
+    ZoneScoped;
     try {
         Router routerA;
         Router routerB;
         routerA.addRoute(RequestType::GET, "/hello", [](const std::string&, const std::string&) {
+            ZoneScoped;
             return "Hello from portA !";
         });
 
         routerA.addRoute(RequestType::PUT, "/goodbye", [](const std::string&, const std::string&) {
+            ZoneScoped;
             return "Goodbye from Port A!";
         });
 
         routerB.addRoute(RequestType::GET, "/hello", [](const std::string&, const std::string&) {
+            ZoneScoped;
             return "Hello from portB !";
         });
         TcpServer serverA(4222, routerA);
@@ -369,10 +382,13 @@ int main() {
         std::cout << "Waiting for a client to connect...\n";
 
         std::thread serverAThread([&serverA]() {
+            tracy::SetThreadName("TcpServer::serverAThread");
+            ZoneScoped;
             serverA.run();
         });
 
         std::thread serverBThread([&serverB]() {
+            ZoneScoped;
             serverB.run();
         });
 
