@@ -1,6 +1,8 @@
 #include "server/server.hpp"
+#include "server/exceptions.hpp"
+#include "server/utils.hpp"
+#include "tracy/Tracy.hpp"
 
-#include <__chrono/calendar.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -10,14 +12,12 @@
 #include <stdexcept>
 #include <thread>
 
-#include "server/exceptions.hpp"
-#include "server/utils.hpp"
-#include "tracy/Tracy.hpp"
+
 
 
 // ———  toRequestType  —————————————
-RequestType toRequestType(const std::string& requestT) {
-    using enum RequestType;
+static router::RequestType toRequestType(const std::string& requestT) {
+    using enum router::RequestType;
     if (requestT == "GET")    {return GET;}
     if (requestT == "POST")   {return POST;}
     if (requestT == "PUT")    {return PUT;}
@@ -26,8 +26,8 @@ RequestType toRequestType(const std::string& requestT) {
 }
 
 // ———  RequestHandlerFactory  —————————————
-std::unique_ptr<RequestHandler>
-RequestHandlerFactory::createHandler(const RequestType type) {
+std::unique_ptr<router::RequestHandler>
+router::RequestHandlerFactory::createHandler(const RequestType type) {
     switch (type) {
         using enum RequestType;
         case GET:    return std::make_unique<GETHandler>();
@@ -39,59 +39,59 @@ RequestHandlerFactory::createHandler(const RequestType type) {
 }
 
 // ———  GET/POST/PUT/DELETE handlers  —————————————
-std::string GETHandler::handler(const std::string& path,const std::string&body){
+std::string router::GETHandler::handler(const std::string& path,const std::string&body){
     return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nGET: " + path + "\n" + body;
 }
-RequestType GETHandler::getType() const { return RequestType::GET; }
+router::RequestType router::GETHandler::getType() const { return RequestType::GET; }
 
-std::string PUTHandler::handler(const std::string& path, const std::string& body) {
+std::string router::PUTHandler::handler(const std::string& path, const std::string& body) {
     return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nPUT: " + path + "\n" + body;
 }
 
-RequestType PUTHandler::getType() const {
+router::RequestType router::PUTHandler::getType() const {
     return RequestType::PUT;
 }
 
-std::string POSTHandler::handler(const std::string& path, const std::string& body) {
+std::string router::POSTHandler::handler(const std::string& path, const std::string& body) {
     return "HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\n\r\nPOST Body: " + body + "\r\n" + path;
 }
 
-RequestType POSTHandler::getType() const {
+router::RequestType router::POSTHandler::getType() const {
     return RequestType::POST;
 }
 
-std::string DELETEHandler::handler(const std::string& path, const std::string& body) {
+std::string router::DELETEHandler::handler(const std::string& path, const std::string& body) {
     return "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nDELETE: " + path + "\r\n" + body;
 }
 
-RequestType DELETEHandler::getType() const {
+router::RequestType router::DELETEHandler::getType() const {
     return RequestType::DELETE;
 }
 
 
 // ———  Router  —————————————
-void Router::addRoute(RequestType type, const std::string& path, RouteHandler handler) {
+void router::Router::addRoute(RequestType type, const std::string& path, RouteHandler handler) {
     routes_[{type, path}] = std::move(handler);
 }
 
-RouteHandler Router::getHandler(RequestType type, const std::string& path) const {
+router::RouteHandler router::Router::getHandler(RequestType type, const std::string& path) const {
     auto it = routes_.find({type, path});
     return it != routes_.end() ? it->second : nullptr;
 }
 
 
 // ———  TcpServer implementation  —————————————
-TcpServer::TcpServer(uint16_t port, Router& router)
+server::TcpServer::TcpServer(uint16_t port, router::Router& router)
   : serverFd_(::socket(AF_INET, SOCK_STREAM, 0)), router_(router)
 {
     if (serverFd_ < 0)
     {
-        throw SocketCreationException("Could not create socket");
+        throw exceptions::SocketCreationException("Could not create socket");
     }
 
     if (constexpr int reuse = 1; setsockopt(serverFd_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0)
     {
-        throw SocketOptionSet("Setsockopt failed");
+        throw exceptions::SocketOptionSet("Setsockopt failed");
     }
 
     sockaddr_in addr{};
@@ -101,16 +101,16 @@ TcpServer::TcpServer(uint16_t port, Router& router)
 
     if (bind(serverFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0)
     {
-        throw BindException("Socket bind failed");
+        throw exceptions::BindException("Socket bind failed");
     }
 
     if (listen(serverFd_, 5) != 0)
     {
-        throw ListenException("listen failed");
+        throw exceptions::ListenException("listen failed");
     }
 }
 
-TcpServer::~TcpServer() {
+server::TcpServer::~TcpServer() {
     {
         std::lock_guard const lock(clientQueueMutex_);
         stop_ = true;
@@ -127,13 +127,13 @@ TcpServer::~TcpServer() {
 }
 }
 
-TcpServer::TcpServer(TcpServer&& other) noexcept
+server::TcpServer::TcpServer(TcpServer&& other) noexcept
   : serverFd_(other.serverFd_), router_(other.router_)
 {
     other.serverFd_ = -1;
 }
 
-TcpServer& TcpServer::operator=(TcpServer&& other) noexcept {
+server::TcpServer& server::TcpServer::operator=(TcpServer&& other) noexcept {
     if (this != &other) {
         if (serverFd_ >= 0)
         {
@@ -147,9 +147,9 @@ TcpServer& TcpServer::operator=(TcpServer&& other) noexcept {
     return *this;
 }
 
-auto TcpServer::run() -> void
+auto server::TcpServer::run() -> void
 {
-    ZoneScoped;
+    ZoneScoped; //NOLINT
     //* Setting the number of dispatcher threads
     constexpr int numWorkers = 1;
     for (int i = 0; i < numWorkers; ++i) {
@@ -157,7 +157,7 @@ auto TcpServer::run() -> void
     }
 
     while (true) {
-        ZoneScopedN("AcceptConnection");
+        ZoneScopedN("AcceptConnection"); //NOLINT
         sockaddr_in clientAddr{};
         socklen_t len = sizeof(clientAddr);
         int const fd = accept(serverFd_, reinterpret_cast<sockaddr*>(&clientAddr), &len);
@@ -166,7 +166,7 @@ auto TcpServer::run() -> void
             continue;
         }
         {
-            ZoneScopedN("QueueClient");
+            ZoneScopedN("QueueClient"); //NOLINT
             const std::lock_guard lock(clientQueueMutex_);
             clientQueue_.push(fd);
         }
@@ -174,7 +174,7 @@ auto TcpServer::run() -> void
     }
 }
 
-void TcpServer::cleanupFinishedThreads() {
+void server::TcpServer::cleanupFinishedThreads() {
     const std::lock_guard lock(threadMutex_);
     erase_if(serverThreads_, [](const std::thread& t) {
         return !t.joinable();
@@ -182,7 +182,7 @@ void TcpServer::cleanupFinishedThreads() {
 }
 
 //* function to block to many requests. Prevents ddos attacks
-bool TcpServer::blockTooManyRequests(const std::string& ip)
+bool server::TcpServer::blockTooManyRequests(const std::string& ip)
 {
     const std::lock_guard lock(ipMutex_);
     const auto now = std::chrono::steady_clock::now();
@@ -193,10 +193,10 @@ bool TcpServer::blockTooManyRequests(const std::string& ip)
     return false;
 }
 
-void TcpServer::workerLoop() {
+void server::TcpServer::workerLoop() {
 
     tracy::SetThreadName("WorkerThread");
-    ZoneScoped;
+    ZoneScoped; //NOLINT
     const auto threadId = std::this_thread::get_id();
     {
         const std::lock_guard lock(loggingMutex_);
@@ -206,7 +206,7 @@ void TcpServer::workerLoop() {
     while (true) {
         int clientFd = 0;
         {
-            ZoneScopedN("WaitForClient");
+            ZoneScopedN("WaitForClient"); //NOLINT
             std::unique_lock lock(clientQueueMutex_);
             clientQueueCond_.wait(lock, [this] {
                 return stop_ || !clientQueue_.empty();
@@ -227,11 +227,11 @@ void TcpServer::workerLoop() {
     }
 }
 
-void TcpServer::handleClient(int clientFd)
+void server::TcpServer::handleClient(int clientFd)
 {
-    ZoneScopedN("TcpServer::handleClient");
+    ZoneScopedN("TcpServer::handleClient"); //NOLINT
     {
-        ZoneScopedN("GetClientInfo");
+        ZoneScopedN("GetClientInfo"); //NOLINT
         const std::lock_guard lock(loggingMutex_);
         std::cout << "[HANDLE] Thread" << std::this_thread::get_id() << " handling client fd = " << clientFd << '\n';
     }
@@ -249,7 +249,7 @@ void TcpServer::handleClient(int clientFd)
 
     if (blockTooManyRequests(clientIP))
     {
-        ZoneScopedN("RateLimit");
+        ZoneScopedN("RateLimit"); //NOLINT
         const std::string response = "HTTP/1.1 429 Too Many Requests\r\n\r\n";
         send(clientFd, response.data(), response.size(), 0);
         close(clientFd);
@@ -258,7 +258,7 @@ void TcpServer::handleClient(int clientFd)
 
 
     while (true) {
-        ZoneScopedN("ProcessRequest");
+        ZoneScopedN("ProcessRequest"); //NOLINT
         const std::string request = utils::readRequest(clientFd);
 
         if (request.empty()) {
@@ -285,10 +285,10 @@ void TcpServer::handleClient(int clientFd)
         }
 
         try {
-            ZoneScopedN("HandleRoute");
-            const RequestType type = toRequestType(method);
+            ZoneScopedN("HandleRoute"); //NOLINT
+            const router::RequestType type = toRequestType(method);
             const std::string body = extractBody(request);
-            const RouteHandler routeHandler = router_.getHandler(type, path);
+            const router::RouteHandler routeHandler = router_.getHandler(type, path);
 
             std::string response;
             if (routeHandler) {
@@ -308,8 +308,8 @@ void TcpServer::handleClient(int clientFd)
                 response = "HTTP/1.1 404 Not Found\r\n\r\nRoute not found";
                 send(clientFd, response.c_str(), response.size(), 0);
             }
-        } catch (HandlerException&) {
-            ZoneScopedN("HandleError");
+        } catch (exceptions::HandlerException&) {
+            ZoneScopedN("HandleError"); //NOLINT
             const std::string response500 = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
             send(clientFd, response500.c_str(), response500.size(), 0);
         }
@@ -323,23 +323,23 @@ void TcpServer::handleClient(int clientFd)
     close(clientFd);
 }
 
-auto TcpServer::extractBody(const std::string &request) -> std::string
+auto server::TcpServer::extractBody(const std::string &request) -> std::string
 {
     auto pos = request.find("\r\n\r\n");
     return pos==std::string::npos ? "" : request.substr(pos+4);
 }
 
-auto ::TcpServer::dispatchLoop() -> void
+auto server::TcpServer::dispatchLoop() -> void
 {
     tracy::SetThreadName("Dispatcher");
-    ZoneScoped;
+    ZoneScoped; //NOLINT
     while (true)
     {
         int clientFd = 0;
         {
             //* Pulling socket from the thread, then removing it from queue and handling
             //* returning from wait
-            ZoneScopedN("TcpServer::dispatchLoop");
+            ZoneScopedN("TcpServer::dispatchLoop"); //NOLINT
             std::unique_lock lock(clientQueueMutex_);
             //* [this] capturing the current pointer to client
             clientQueueCond_.wait(lock, [this] {
@@ -359,36 +359,36 @@ auto ::TcpServer::dispatchLoop() -> void
 
 int main() {
     tracy::SetThreadName("MainThread");
-    ZoneScoped;
+    ZoneScoped; //NOLINT
     try {
-        Router routerA;
-        Router routerB;
-        routerA.addRoute(RequestType::GET, "/hello", [](const std::string&, const std::string&) {
-            ZoneScoped;
+        router::Router routerA;
+        router::Router routerB;
+        routerA.addRoute(router::RequestType::GET, "/hello", [](const std::string&, const std::string&) {
+            ZoneScoped; //NOLINT
             return "Hello from portA !";
         });
 
-        routerA.addRoute(RequestType::PUT, "/goodbye", [](const std::string&, const std::string&) {
-            ZoneScoped;
+        routerA.addRoute(router::RequestType::PUT, "/goodbye", [](const std::string&, const std::string&) {
+            ZoneScoped; //NOLINT
             return "Goodbye from Port A!";
         });
 
-        routerB.addRoute(RequestType::GET, "/hello", [](const std::string&, const std::string&) {
-            ZoneScoped;
+        routerB.addRoute(router::RequestType::GET, "/hello", [](const std::string&, const std::string&) {
+            ZoneScoped; //NOLINT
             return "Hello from portB !";
         });
-        TcpServer serverA(4222, routerA);
-        TcpServer serverB(4444, routerB);
+        server::TcpServer serverA(4222, routerA);
+        server::TcpServer serverB(4444, routerB);
         std::cout << "Waiting for a client to connect...\n";
 
         std::thread serverAThread([&serverA]() {
             tracy::SetThreadName("TcpServer::serverAThread");
-            ZoneScoped;
+            ZoneScoped; //NOLINT
             serverA.run();
         });
 
         std::thread serverBThread([&serverB]() {
-            ZoneScoped;
+            ZoneScoped; //NOLINT
             serverB.run();
         });
 

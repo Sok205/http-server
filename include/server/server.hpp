@@ -10,7 +10,8 @@
 #include <server/utils.hpp>
 #include <tracy/Tracy.hpp>
 
-
+namespace router
+{
 class Router;
 
 using RouteHandler = std::function<std::string(const std::string&, const std::string&)>;
@@ -64,7 +65,8 @@ public:
     static std::unique_ptr<RequestHandler> createHandler(RequestType type);
 };
 
-class Router {
+class Router
+{
 public:
     void addRoute(RequestType type, const std::string& path, RouteHandler handler);
     RouteHandler getHandler(RequestType type, const std::string& path) const;
@@ -79,10 +81,13 @@ private:
     };
     std::unordered_map<std::pair<RequestType, std::string>, RouteHandler, Hash> routes_;
 };
+};//namespace router
 
+namespace server
+{
 class TcpServer {
 public:
-    TcpServer(uint16_t port, Router& router);
+    TcpServer(uint16_t port, router::Router& router);
     ~TcpServer();
 
     TcpServer(const TcpServer&) = delete;
@@ -94,7 +99,7 @@ public:
 
 private:
     int serverFd_;
-    Router& router_;
+    router::Router& router_;
     // ! Don't know how to make it work xd
     std::unordered_map<
         std::string,
@@ -129,5 +134,5 @@ private:
     bool blockTooManyRequests(const std::string& ip);
     static std::string extractBody(const std::string& request);
 
-
 };
+}
